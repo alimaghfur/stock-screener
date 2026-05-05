@@ -10,8 +10,16 @@ import streamlit as st
 from core.data import fetch_history, fetch_quote
 from core.indicators import atr as atr_indicator
 from core.risk import calculate_trade_plan
-from core.screener import screen_universe
+from core.screener import screen_universe, strategies_for_market
 from core.universe import currency_of, get_universe, list_markets, list_universes
+
+# Human-readable labels for each strategy id (kept in sync with the Screener page).
+STRATEGY_LABELS: dict[str, str] = {
+    "scalping": "scalping",
+    "swing": "swing",
+    "bpjs": "BPJS (Beli Pagi Jual Sore)",
+    "bsjp": "BSJP (Beli Sore Jual Pagi)",
+}
 
 st.set_page_config(page_title="Positions", page_icon="💼", layout="wide")
 st.title("💼 Recommended Positions")
@@ -27,7 +35,23 @@ with st.sidebar:
     st.header("Filters")
     market = st.selectbox("Market", list_markets(), index=0)
     universe_name = st.selectbox("Universe", list_universes(market))
-    strategy = st.radio("Strategy", ["scalping", "swing"], horizontal=True)
+    available_strategies = strategies_for_market(market)
+    strategy = st.radio(
+        "Strategy",
+        available_strategies,
+        format_func=lambda s: STRATEGY_LABELS.get(s, s),
+        horizontal=True,
+    )
+    if strategy == "bpjs":
+        st.caption(
+            "BPJS: cari saham dengan tendency naik dari open ke close (sesi pagi → sore). "
+            "Pure pattern statistik dari 20 hari terakhir — bukan jaminan."
+        )
+    elif strategy == "bsjp":
+        st.caption(
+            "BSJP: cari saham dengan tendency gap-up overnight (close → next open). "
+            "Pure pattern statistik dari 20 hari terakhir — bukan jaminan."
+        )
 
     st.divider()
     st.subheader("Risk settings")
@@ -36,7 +60,10 @@ with st.sidebar:
     top_n = st.slider("Max recommendations", 3, 25, 10, 1)
 
 symbols = get_universe(market, universe_name)
-st.caption(f"Universe: **{universe_name}** ({len(symbols)} symbols) — strategy: **{strategy}**")
+st.caption(
+    f"Universe: **{universe_name}** ({len(symbols)} symbols) — "
+    f"strategy: **{STRATEGY_LABELS.get(strategy, strategy)}**"
+)
 
 # --- Generate recommendations ------------------------------------------------------
 
@@ -78,10 +105,11 @@ if generate:
                 continue
 
             ccy = currency_of(r.symbol)
+            strategy_display = r.strategy.upper() if r.strategy in {"bpjs", "bsjp"} else r.strategy
             rows.append({
                 "Symbol": r.symbol,
                 "Side": plan.side,
-                "Strategy": r.strategy,
+                "Strategy": strategy_display,
                 "Score": r.score,
                 "Entry": plan.entry,
                 "Stop-Loss": plan.stop_loss,
@@ -113,7 +141,8 @@ cache = st.session_state.get("recommendations")
 if cache and cache["rows"]:
     st.divider()
     params = cache["params"]
-    st.subheader(f"Top {len(cache['rows'])} {params['strategy']} ideas — {params['universe']}")
+    strategy_label = STRATEGY_LABELS.get(params["strategy"], params["strategy"])
+    st.subheader(f"Top {len(cache['rows'])} {strategy_label} ideas — {params['universe']}")
     st.caption(
         f"Generated at {cache['generated_at']} UTC · "
         f"SL = {params['sl_mult']}× ATR · risk:reward = 1 : {params['rr']:.1f}"

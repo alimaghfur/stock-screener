@@ -13,7 +13,7 @@ from core.data import fetch_history
 @dataclass
 class ScreenResult:
     symbol: str
-    strategy: str            # "scalping" or "swing"
+    strategy: str            # "scalping" | "swing" | "bpjs" | "bsjp"
     side: str                # "long" or "short"
     score: float             # 0..100
     last: float
@@ -185,8 +185,169 @@ def _swing_score(df: pd.DataFrame) -> ScreenResult | None:
 
 
 # ---------------------------------------------------------------------------
+# Indonesian intraday / overnight pattern strategies
+# ---------------------------------------------------------------------------
+
+# Lookback for the BPJS / BSJP edge calculation.
+_PATTERN_LOOKBACK = 20
+
+# Filters: minimum positive edge and minimum consistency (% of green days).
+_BPJS_MIN_EDGE = 0.003   # 0.30 % average intraday return
+_BPJS_MIN_GREEN = 0.60   # at least 12/20 days closed > opened
+_BSJP_MIN_EDGE = 0.002   # 0.20 % average overnight gap
+_BSJP_MIN_GREEN = 0.55   # at least 11/20 days gapped up
+
+# Score-cap reference points (where the edge contributes the full 50 pts).
+_BPJS_EDGE_CAP = 0.015   # 1.5 % avg intraday return = full edge score
+_BSJP_EDGE_CAP = 0.010   # 1.0 % avg overnight gap = full edge score
+
+
+def _bpjs_score(df: pd.DataFrame) -> ScreenResult | None:
+    """Beli Pagi Jual Sore — buy at open, sell at close (intraday).
+
+    Long-only filter, looks for stocks whose Open→Close return tends to be
+    positive over the last `_PATTERN_LOOKBACK` daily bars:
+      - avg intraday return ((Close − Open) / Open) ≥ ``_BPJS_MIN_EDGE``
+      - green-day ratio (Close > Open) ≥ ``_BPJS_MIN_GREEN``
+
+    The score combines edge size and consistency (50 / 50).
+    """
+    if df.empty or len(df) < _PATTERN_LOOKBACK + 14:
+        return None
+
+    close = df["Close"].astype(float)
+    open_ = df["Open"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    volume = df["Volume"].astype(float)
+
+    intraday_ret = ((close - open_) / open_).iloc[-_PATTERN_LOOKBACK:].dropna()
+    if len(intraday_ret) < _PATTERN_LOOKBACK:
+        return None
+    avg_edge = float(intraday_ret.mean())
+    green_days = int((intraday_ret > 0).sum())
+    green_ratio = green_days / _PATTERN_LOOKBACK
+
+    if avg_edge < _BPJS_MIN_EDGE or green_ratio < _BPJS_MIN_GREEN:
+        return None
+
+    rsi_v = _safe_last(ind.rsi(close, 14))
+    atr_v = _safe_last(ind.atr(high, low, close, 14))
+    vol_v = _safe_last(ind.volume_ratio(volume, 20))
+    last = _safe_last(close)
+    if any(pd.isna(x) for x in (last, rsi_v, atr_v, vol_v)):
+        return None
+
+    atr_pct = (atr_v / last * 100.0) if last else 0.0
+    change_pct = float(ind.pct_change(close, 1).iloc[-1]) if len(close) >= 2 else 0.0
+
+    reasons = [
+        f"Avg O→C +{avg_edge * 100:.2f}% (20d)",
+        f"{green_days}/{_PATTERN_LOOKBACK} green days",
+    ]
+    if vol_v >= 1.2:
+        reasons.append(f"Vol {vol_v:.1f}x avg")
+
+    edge_score = min(avg_edge / _BPJS_EDGE_CAP, 1.0) * 50.0
+    cons_score = ((green_ratio - _BPJS_MIN_GREEN) / (1.0 - _BPJS_MIN_GREEN)) * 50.0
+    cons_score = max(0.0, min(cons_score, 50.0))
+    score = round(edge_score + cons_score, 1)
+
+    return ScreenResult(
+        symbol="",
+        strategy="bpjs",
+        side="long",
+        score=score,
+        last=round(last, 4),
+        change_pct=round(change_pct, 2),
+        rsi=round(rsi_v, 1),
+        atr=round(atr_v, 4),
+        atr_pct=round(atr_pct, 2),
+        volume_ratio=round(vol_v, 2),
+        reasons=reasons,
+    )
+
+
+def _bsjp_score(df: pd.DataFrame) -> ScreenResult | None:
+    """Beli Sore Jual Pagi — buy at close, sell at next open (overnight).
+
+    Long-only filter, looks for stocks whose overnight gap tends to be
+    positive over the last `_PATTERN_LOOKBACK` daily bars:
+      - avg overnight gap ((Open − prev Close) / prev Close) ≥ ``_BSJP_MIN_EDGE``
+      - gap-up ratio (Open > prev Close) ≥ ``_BSJP_MIN_GREEN``
+    """
+    if df.empty or len(df) < _PATTERN_LOOKBACK + 14:
+        return None
+
+    close = df["Close"].astype(float)
+    open_ = df["Open"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    volume = df["Volume"].astype(float)
+
+    prev_close = close.shift(1)
+    overnight = ((open_ - prev_close) / prev_close).iloc[-_PATTERN_LOOKBACK:].dropna()
+    if len(overnight) < _PATTERN_LOOKBACK:
+        return None
+    avg_gap = float(overnight.mean())
+    gap_up_days = int((overnight > 0).sum())
+    gap_up_ratio = gap_up_days / _PATTERN_LOOKBACK
+
+    if avg_gap < _BSJP_MIN_EDGE or gap_up_ratio < _BSJP_MIN_GREEN:
+        return None
+
+    rsi_v = _safe_last(ind.rsi(close, 14))
+    atr_v = _safe_last(ind.atr(high, low, close, 14))
+    vol_v = _safe_last(ind.volume_ratio(volume, 20))
+    last = _safe_last(close)
+    if any(pd.isna(x) for x in (last, rsi_v, atr_v, vol_v)):
+        return None
+
+    atr_pct = (atr_v / last * 100.0) if last else 0.0
+    change_pct = float(ind.pct_change(close, 1).iloc[-1]) if len(close) >= 2 else 0.0
+
+    reasons = [
+        f"Avg overnight gap +{avg_gap * 100:.2f}% (20d)",
+        f"{gap_up_days}/{_PATTERN_LOOKBACK} gap-up days",
+    ]
+    if vol_v >= 1.2:
+        reasons.append(f"Vol {vol_v:.1f}x avg")
+
+    edge_score = min(avg_gap / _BSJP_EDGE_CAP, 1.0) * 50.0
+    cons_score = ((gap_up_ratio - _BSJP_MIN_GREEN) / (1.0 - _BSJP_MIN_GREEN)) * 50.0
+    cons_score = max(0.0, min(cons_score, 50.0))
+    score = round(edge_score + cons_score, 1)
+
+    return ScreenResult(
+        symbol="",
+        strategy="bsjp",
+        side="long",
+        score=score,
+        last=round(last, 4),
+        change_pct=round(change_pct, 2),
+        rsi=round(rsi_v, 1),
+        atr=round(atr_v, 4),
+        atr_pct=round(atr_pct, 2),
+        volume_ratio=round(vol_v, 2),
+        reasons=reasons,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+# Strategies that are only meaningful on Indonesian equities (sesi pagi/sore).
+IDX_ONLY_STRATEGIES = ("bpjs", "bsjp")
+
+
+def strategies_for_market(market: str) -> list[str]:
+    """Return the list of strategies available for the given market."""
+    base = ["scalping", "swing"]
+    if market.upper() == "IDX":
+        return base + list(IDX_ONLY_STRATEGIES)
+    return base
+
 
 def screen_symbol(symbol: str, strategy: str) -> ScreenResult | None:
     """Screen a single symbol; returns None if it doesn't qualify."""
@@ -198,6 +359,12 @@ def screen_symbol(symbol: str, strategy: str) -> ScreenResult | None:
     elif strategy == "swing":
         df = fetch_history(symbol, period="6mo", interval="1d")
         result = _swing_score(df)
+    elif strategy == "bpjs":
+        df = fetch_history(symbol, period="6mo", interval="1d")
+        result = _bpjs_score(df)
+    elif strategy == "bsjp":
+        df = fetch_history(symbol, period="6mo", interval="1d")
+        result = _bsjp_score(df)
     else:
         raise ValueError(f"unknown strategy: {strategy}")
     if result is not None:

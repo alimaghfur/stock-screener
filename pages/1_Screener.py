@@ -8,7 +8,7 @@ import streamlit as st
 from core.data import fetch_history, fetch_quote, normalize_symbol
 from core.indicators import atr
 from core.risk import calculate_trade_plan, position_size
-from core.screener import screen_universe
+from core.screener import screen_universe, strategies_for_market
 from core.universe import (
     currency_of,
     get_universe,
@@ -16,6 +16,14 @@ from core.universe import (
     list_universes,
     market_of,
 )
+
+# Human-readable labels for each strategy id.
+STRATEGY_LABELS: dict[str, str] = {
+    "scalping": "scalping",
+    "swing": "swing",
+    "bpjs": "BPJS (Beli Pagi Jual Sore)",
+    "bsjp": "BSJP (Beli Sore Jual Pagi)",
+}
 
 st.set_page_config(page_title="Screener", page_icon="🔎", layout="wide")
 st.title("🔎 Screener")
@@ -26,7 +34,23 @@ with st.sidebar:
     st.header("Filters")
     market = st.selectbox("Market", list_markets(), index=0)
     universe_name = st.selectbox("Universe", list_universes(market))
-    strategy = st.radio("Strategy", ["scalping", "swing"], horizontal=True)
+    available_strategies = strategies_for_market(market)
+    strategy = st.radio(
+        "Strategy",
+        available_strategies,
+        format_func=lambda s: STRATEGY_LABELS.get(s, s),
+        horizontal=True,
+    )
+    if strategy == "bpjs":
+        st.caption(
+            "BPJS: cari saham dengan tendency naik dari open ke close (sesi pagi → sore). "
+            "Pure pattern statistik dari 20 hari terakhir — bukan jaminan."
+        )
+    elif strategy == "bsjp":
+        st.caption(
+            "BSJP: cari saham dengan tendency gap-up overnight (close → next open). "
+            "Pure pattern statistik dari 20 hari terakhir — bukan jaminan."
+        )
 
     custom_input = st.text_area(
         "Custom tickers (optional)",
@@ -53,7 +77,10 @@ def _resolve_symbols() -> list[str]:
 
 
 symbols = _resolve_symbols()
-st.caption(f"{len(symbols)} symbol(s) selected — strategy: **{strategy}**")
+st.caption(
+    f"{len(symbols)} symbol(s) selected — "
+    f"strategy: **{STRATEGY_LABELS.get(strategy, strategy)}**"
+)
 
 # --- Run scan ----------------------------------------------------------------------
 
@@ -135,22 +162,5 @@ if sel_symbol:
         col8.metric("Risk amount", f"{size['risk_amount']:,.0f} {ccy}")
         col9.metric("Suggested qty", f"{size['qty']:,}")
         col10.metric("Estimated cost", f"{size['cost']:,.0f} {ccy}")
-
-        # Save plan to session for the Positions page to pick up.
-        st.session_state["last_plan"] = {
-            "symbol": sel_symbol,
-            "side": plan.side,
-            "strategy": strategy,
-            "entry": plan.entry,
-            "qty": size["qty"],
-            "stop_loss": plan.stop_loss,
-            "take_profit": plan.tp2,
-        }
-        st.info(
-            f"Open the **Positions** page and click *Save last plan* to log this trade "
-            f"(TP={plan.tp2}, SL={plan.stop_loss}, qty={size['qty']}). "
-            f"Symbol & side are pre-filled.",
-            icon="ℹ️",
-        )
 
 st.caption(f"Currency hint based on symbol suffix. Detected market for sample symbol: {market_of(sel_symbol) if sel_symbol else '—'}")
