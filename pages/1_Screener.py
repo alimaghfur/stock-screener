@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.data import fetch_history, fetch_quote, normalize_symbol
 from core.indicators import atr
 from core.news import fetch_news_for_symbol, humanize_age
 from core.risk import calculate_trade_plan, position_size
 from core.screener import screen_universe, strategies_for_market
+from core.tradingview import (
+    WidgetConfig,
+    advanced_chart_html,
+    technical_analysis_html,
+    to_tradingview_symbol,
+)
 from core.universe import (
     currency_of,
     get_universe,
@@ -164,6 +171,34 @@ if sel_symbol:
         col9.metric("Suggested qty", f"{size['qty']:,}")
         col10.metric("Estimated cost", f"{size['cost']:,.0f} {ccy}")
 
+        st.divider()
+        st.markdown("**TradingView chart**")
+        tv_symbol = to_tradingview_symbol(sel_symbol)
+        st.caption(
+            f"Mapped to `{tv_symbol or sel_symbol}` on TradingView. "
+            "Use this for drawing tools / extra indicators."
+        )
+        chart_cfg = WidgetConfig(theme="light", height=520)
+        components.html(
+            advanced_chart_html(sel_symbol, chart_cfg),
+            height=chart_cfg.height + 20,
+            scrolling=False,
+        )
+
+        st.markdown("**Technical Analysis (TradingView second opinion)**")
+        ta_cfg = WidgetConfig(theme="light", height=400)
+        components.html(
+            technical_analysis_html(sel_symbol, ta_cfg),
+            height=ta_cfg.height + 20,
+            scrolling=False,
+        )
+        st.caption(
+            "Strong Buy / Buy / Neutral / Sell / Strong Sell — TradingView's own "
+            "verdict from oscillators + moving averages. Treat as a sanity check, "
+            "not a confirmation."
+        )
+
+        st.divider()
         st.markdown("**Latest news**")
         articles = fetch_news_for_symbol(sel_symbol, limit=5)
         if not articles:

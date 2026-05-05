@@ -48,6 +48,18 @@ def init_db(db_path: str | Path | None = None) -> None:
                 triggered_at TEXT,
                 note TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS tv_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                condition TEXT NOT NULL,
+                value REAL,
+                received_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'new'
+                    CHECK (status IN ('new','acknowledged','dismissed')),
+                note TEXT,
+                raw TEXT
+            );
             """
         )
 
@@ -177,6 +189,76 @@ def cancel_alert(alert_id: int, db_path: str | Path | None = None) -> None:
 def delete_alert(alert_id: int, db_path: str | Path | None = None) -> None:
     with _connect(db_path) as conn:
         conn.execute("DELETE FROM alerts WHERE id=?", (alert_id,))
+        conn.commit()
+
+
+# --- TradingView webhook alerts -----------------------------------------------------
+
+def add_tv_alert(
+    *,
+    symbol: str,
+    condition: str,
+    value: float | None = None,
+    note: str | None = None,
+    raw: str | None = None,
+    received_at: str | None = None,
+    db_path: str | Path | None = None,
+) -> int:
+    """Persist an alert delivered by the TradingView webhook receiver."""
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO tv_alerts (symbol, condition, value, received_at, status, note, raw)
+            VALUES (?, ?, ?, ?, 'new', ?, ?)
+            """,
+            (
+                symbol.upper(),
+                condition,
+                value,
+                received_at or _now(),
+                note,
+                raw,
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def list_tv_alerts(
+    status: str | None = None,
+    db_path: str | Path | None = None,
+) -> list[dict]:
+    sql = "SELECT * FROM tv_alerts"
+    params: tuple = ()
+    if status:
+        sql += " WHERE status = ?"
+        params = (status,)
+    sql += " ORDER BY received_at DESC"
+    with _connect(db_path) as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_tv_alert_status(
+    alert_id: int,
+    status: str,
+    db_path: str | Path | None = None,
+) -> None:
+    if status not in ("new", "acknowledged", "dismissed"):
+        raise ValueError(
+            "tv_alert status must be 'new', 'acknowledged' or 'dismissed'"
+        )
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE tv_alerts SET status=? WHERE id=?",
+            (status, alert_id),
+        )
+        conn.commit()
+
+
+def delete_tv_alert(alert_id: int, db_path: str | Path | None = None) -> None:
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM tv_alerts WHERE id=?", (alert_id,))
         conn.commit()
 
 

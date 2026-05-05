@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.data import normalize_symbol
 from core.news import fetch_news_for_symbol, fetch_news_for_universe, humanize_age
+from core.tradingview import WidgetConfig, top_stories_html
 from core.universe import (
     currency_of,
     get_universe,
@@ -25,6 +27,16 @@ st.caption(
 
 with st.sidebar:
     st.header("Filters")
+    source = st.radio(
+        "Source",
+        ["Yahoo Finance", "TradingView"],
+        horizontal=True,
+        help=(
+            "Yahoo Finance: per-ticker article cards from yfinance (delayed). "
+            "TradingView: embedded Top Stories widget (covers some IDX names "
+            "Yahoo misses)."
+        ),
+    )
     market = st.selectbox("Market", list_markets(), index=0)
     universe_name = st.selectbox("Universe", list_universes(market))
     custom_input = st.text_area(
@@ -34,10 +46,25 @@ with st.sidebar:
     )
 
     st.divider()
-    st.subheader("Display")
-    per_symbol = st.slider("Articles per ticker", 1, 10, 3)
-    max_total = st.slider("Max articles total", 5, 60, 25)
-    show_thumbs = st.checkbox("Show thumbnails", value=True)
+    if source == "Yahoo Finance":
+        st.subheader("Display")
+        per_symbol = st.slider("Articles per ticker", 1, 10, 3)
+        max_total = st.slider("Max articles total", 5, 60, 25)
+        show_thumbs = st.checkbox("Show thumbnails", value=True)
+    else:
+        st.subheader("TradingView widget")
+        tv_focus = st.text_input(
+            "Focus ticker (optional)",
+            placeholder="BBCA.JK / AAPL",
+            help=(
+                "Leave empty to show TradingView's global top stories. Enter a "
+                "ticker to filter the feed to that single name."
+            ),
+        )
+        tv_height = st.slider("Widget height (px)", 400, 1000, 700, 50)
+        per_symbol = 3
+        max_total = 25
+        show_thumbs = True
 
 
 def _resolve_symbols() -> list[str]:
@@ -48,6 +75,23 @@ def _resolve_symbols() -> list[str]:
 
 
 symbols = _resolve_symbols()
+
+# --- TradingView widget mode -------------------------------------------------------
+
+if source == "TradingView":
+    focus = tv_focus.strip().upper() if tv_focus else ""
+    label = focus or "global feed"
+    st.caption(
+        f"Source: **TradingView Top Stories** — {label}. Widget is rendered "
+        "directly by TradingView; news content is theirs, not Yahoo's."
+    )
+    cfg = WidgetConfig(theme="light", height=tv_height)
+    components.html(
+        top_stories_html(focus or None, cfg),
+        height=tv_height + 20,
+        scrolling=False,
+    )
+    st.stop()
 
 # --- Header strip ------------------------------------------------------------------
 
