@@ -7,6 +7,7 @@ import streamlit as st
 
 from core.data import fetch_history, fetch_quote, normalize_symbol
 from core.indicators import atr
+from core.news import fetch_news_for_symbol, humanize_age
 from core.risk import calculate_trade_plan, position_size
 from core.screener import screen_universe, strategies_for_market
 from core.universe import (
@@ -162,5 +163,20 @@ if sel_symbol:
         col8.metric("Risk amount", f"{size['risk_amount']:,.0f} {ccy}")
         col9.metric("Suggested qty", f"{size['qty']:,}")
         col10.metric("Estimated cost", f"{size['cost']:,.0f} {ccy}")
+
+        st.markdown("**Latest news**")
+        articles = fetch_news_for_symbol(sel_symbol, limit=5)
+        if not articles:
+            st.caption(
+                "No recent headlines on Yahoo Finance for this ticker. "
+                "Cross-check sentiment elsewhere before entering."
+            )
+        else:
+            for art in articles:
+                title = (
+                    f"[{art.title}]({art.url})" if art.url else art.title
+                )
+                st.markdown(f"- **{title}**  \n"
+                            f"  _{art.publisher} · {humanize_age(art.published_at)}_")
 
 st.caption(f"Currency hint based on symbol suffix. Detected market for sample symbol: {market_of(sel_symbol) if sel_symbol else '—'}")
