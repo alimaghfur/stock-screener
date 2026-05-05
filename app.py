@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.db import init_db, list_alerts, list_positions
+from core.db import init_db, list_alerts
 
 st.set_page_config(
     page_title="Stock Screener — IDX & US",
@@ -18,7 +18,7 @@ init_db()
 
 st.title("📈 Stock Screener — IDX & US")
 st.caption(
-    "Scalping & swing screener with TP/SL suggestion, top movers, position tracking, "
+    "Scalping & swing screener with TP/SL suggestion, top movers, recommended positions, "
     "and price alerts. Data: Yahoo Finance (delayed ~15 min)."
 )
 
@@ -28,21 +28,15 @@ st.markdown(
 
 1. **Screener** — pick a market & strategy (scalping / swing), pick a universe or enter custom tickers, and run.
 2. **Top Movers** — see today's biggest gainers and losers.
-3. **Positions** — log open trades with entry, TP, SL; track live P/L.
+3. **Positions** — batch trade ideas (entry / SL / TP1–TP3) for the top scan candidates. Read-only.
 4. **Alerts** — set price alerts (above / below) per symbol.
 
 Use the sidebar to navigate.
 """
 )
 
-col1, col2, col3 = st.columns(3)
-open_positions = list_positions(status="open")
-closed_positions = list_positions(status="closed")
 active_alerts = list_alerts(status="active")
-
-col1.metric("Open positions", len(open_positions))
-col2.metric("Closed positions", len(closed_positions))
-col3.metric("Active alerts", len(active_alerts))
+st.metric("Active alerts", len(active_alerts))
 
 st.divider()
 

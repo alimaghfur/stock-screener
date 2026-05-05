@@ -1,203 +1,139 @@
-"""Positions page — log trades, monitor live P/L, close positions."""
+"""Positions page — recommended trade ideas with TP/SL, batched from a screener scan."""
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
-from core.data import fetch_quote, normalize_symbol
-from core.db import (
-    add_position,
-    close_position,
-    delete_position,
-    init_db,
-    list_positions,
-)
-from core.risk import unrealized_pnl
-from core.universe import currency_of
+from core.data import fetch_history, fetch_quote
+from core.indicators import atr as atr_indicator
+from core.risk import calculate_trade_plan
+from core.screener import screen_universe
+from core.universe import currency_of, get_universe, list_markets, list_universes
 
 st.set_page_config(page_title="Positions", page_icon="💼", layout="wide")
-st.title("💼 Positions")
+st.title("💼 Recommended Positions")
+st.caption(
+    "Auto-generated trade ideas. Pick a market & strategy, click Generate, and the app "
+    "will scan the universe and produce a ready-to-act plan (entry / SL / TP1–TP3) for "
+    "each candidate. Read-only — this page does not place orders."
+)
 
-init_db()
+# --- Sidebar controls --------------------------------------------------------------
 
-# --- Add position ------------------------------------------------------------------
+with st.sidebar:
+    st.header("Filters")
+    market = st.selectbox("Market", list_markets(), index=0)
+    universe_name = st.selectbox("Universe", list_universes(market))
+    strategy = st.radio("Strategy", ["scalping", "swing"], horizontal=True)
 
-st.subheader("Open new position")
+    st.divider()
+    st.subheader("Risk settings")
+    sl_mult = st.slider("SL multiplier (× ATR)", 0.5, 4.0, 1.5, 0.1)
+    rr = st.slider("Risk : Reward (TP2)", 1.0, 5.0, 2.0, 0.5)
+    top_n = st.slider("Max recommendations", 3, 25, 10, 1)
 
-last_plan = st.session_state.get("last_plan")
+symbols = get_universe(market, universe_name)
+st.caption(f"Universe: **{universe_name}** ({len(symbols)} symbols) — strategy: **{strategy}**")
 
-with st.form("add_position"):
-    col1, col2, col3 = st.columns(3)
-    symbol = col1.text_input(
-        "Symbol",
-        value=last_plan.get("symbol", "") if last_plan else "",
-        placeholder="BBCA.JK / AAPL",
+# --- Generate recommendations ------------------------------------------------------
+
+generate = st.button("Generate recommendations", type="primary")
+if generate:
+    if not symbols:
+        st.warning("No symbols selected.")
+        st.stop()
+
+    with st.spinner(f"Scanning {len(symbols)} symbols…"):
+        results = screen_universe(symbols, strategy)
+
+    if not results:
+        st.info("No candidates passed the filters. Try a different universe or strategy.")
+        st.session_state.pop("recommendations", None)
+    else:
+        rows = []
+        for r in results[:top_n]:
+            df_d = fetch_history(r.symbol, period="6mo", interval="1d")
+            quote = fetch_quote(r.symbol)
+            if df_d.empty or not quote:
+                continue
+            atr_series = atr_indicator(
+                df_d["High"], df_d["Low"], df_d["Close"], 14
+            ).dropna()
+            if atr_series.empty:
+                continue
+            atr_v = float(atr_series.iloc[-1])
+            entry = float(quote["price"])
+            try:
+                plan = calculate_trade_plan(
+                    entry=entry,
+                    atr_value=atr_v,
+                    side=r.side,
+                    sl_atr_mult=sl_mult,
+                    rr=rr,
+                )
+            except ValueError:
+                continue
+
+            ccy = currency_of(r.symbol)
+            rows.append({
+                "Symbol": r.symbol,
+                "Side": plan.side,
+                "Strategy": r.strategy,
+                "Score": r.score,
+                "Entry": plan.entry,
+                "Stop-Loss": plan.stop_loss,
+                "TP1 (1R)": plan.tp1,
+                f"TP2 ({plan.risk_reward:.1f}R)": plan.tp2,
+                f"TP3 ({plan.risk_reward + 1:.1f}R)": plan.tp3,
+                "ATR(14)": plan.atr,
+                "Risk : Reward": f"1 : {plan.risk_reward:.1f}",
+                "Reasons": ", ".join(r.reasons),
+                "Currency": ccy,
+            })
+
+        st.session_state["recommendations"] = {
+            "rows": rows,
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "params": {
+                "market": market,
+                "universe": universe_name,
+                "strategy": strategy,
+                "sl_mult": sl_mult,
+                "rr": rr,
+                "top_n": top_n,
+            },
+        }
+
+# --- Render last recommendations ---------------------------------------------------
+
+cache = st.session_state.get("recommendations")
+if cache and cache["rows"]:
+    st.divider()
+    params = cache["params"]
+    st.subheader(f"Top {len(cache['rows'])} {params['strategy']} ideas — {params['universe']}")
+    st.caption(
+        f"Generated at {cache['generated_at']} UTC · "
+        f"SL = {params['sl_mult']}× ATR · risk:reward = 1 : {params['rr']:.1f}"
     )
-    side = col2.selectbox("Side", ["long", "short"], index=0 if not last_plan else (0 if last_plan["side"] == "long" else 1))
-    strategy = col3.selectbox("Strategy", ["scalping", "swing"], index=0 if not last_plan else (0 if last_plan["strategy"] == "scalping" else 1))
 
-    col4, col5, col6 = st.columns(3)
-    entry = col4.number_input("Entry price", min_value=0.0, value=float(last_plan["entry"]) if last_plan else 0.0, step=0.01, format="%.4f")
-    qty = col5.number_input("Quantity", min_value=0.0, value=float(last_plan["qty"]) if last_plan else 0.0, step=1.0)
-    sl = col6.number_input("Stop-Loss", min_value=0.0, value=float(last_plan["stop_loss"]) if last_plan else 0.0, step=0.01, format="%.4f")
-
-    col7, col8 = st.columns(2)
-    tp = col7.number_input("Take-Profit", min_value=0.0, value=float(last_plan["take_profit"]) if last_plan else 0.0, step=0.01, format="%.4f")
-    note = col8.text_input("Note (optional)")
-
-    submitted = st.form_submit_button("Save position", type="primary")
-    if submitted:
-        sym = normalize_symbol(symbol)
-        if not sym or entry <= 0 or qty <= 0 or sl <= 0 or tp <= 0:
-            st.error("Fill in symbol, entry, qty, SL, and TP (all > 0).")
-        else:
-            pos_id = add_position(
-                symbol=sym, side=side, strategy=strategy,
-                entry=float(entry), qty=float(qty),
-                stop_loss=float(sl), take_profit=float(tp),
-                note=note or None,
-            )
-            st.success(f"Position #{pos_id} ({sym} {side}) saved.")
-            if last_plan and last_plan.get("symbol", "").upper() == sym:
-                st.session_state.pop("last_plan", None)
-
-if last_plan:
-    st.caption(f"Form pre-filled from last plan: {last_plan['symbol']} {last_plan['side']}.")
-
-# --- Open positions ----------------------------------------------------------------
-
-st.divider()
-st.subheader("Open positions")
-
-open_pos = list_positions(status="open")
-if not open_pos:
-    st.info("No open positions yet.")
-else:
-    rows = []
-    total_pnl = 0.0
-    for p in open_pos:
-        q = fetch_quote(p["symbol"])
-        last = float(q["price"]) if q else float("nan")
-        pnl = unrealized_pnl(p["side"], p["entry"], p["qty"], last) if q else {"pnl": 0.0, "pnl_pct": 0.0}
-        total_pnl += pnl["pnl"]
-
-        # Status flags vs SL / TP.
-        status_flag = "—"
-        if q:
-            if p["side"] == "long":
-                if last <= p["stop_loss"]:
-                    status_flag = "⚠️ SL hit"
-                elif last >= p["take_profit"]:
-                    status_flag = "🎯 TP hit"
-            else:
-                if last >= p["stop_loss"]:
-                    status_flag = "⚠️ SL hit"
-                elif last <= p["take_profit"]:
-                    status_flag = "🎯 TP hit"
-
-        rows.append({
-            "ID": p["id"],
-            "Symbol": p["symbol"],
-            "Side": p["side"],
-            "Strategy": p["strategy"],
-            "Entry": p["entry"],
-            "Qty": p["qty"],
-            "SL": p["stop_loss"],
-            "TP": p["take_profit"],
-            "Last": last,
-            "P/L": pnl["pnl"],
-            "P/L %": pnl["pnl_pct"],
-            "Flag": status_flag,
-            "Opened": p["opened_at"],
-            "Note": p.get("note") or "",
-        })
-
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(cache["rows"])
+    price_cols = [c for c in df.columns if c in {"Entry", "Stop-Loss", "ATR(14)"} or c.startswith("TP")]
+    fmt = {c: "{:,.4f}" for c in price_cols}
+    fmt["Score"] = "{:.1f}"
     st.dataframe(
-        df.style.format({
-            "Entry": "{:,.4f}",
-            "Qty": "{:,.0f}",
-            "SL": "{:,.4f}",
-            "TP": "{:,.4f}",
-            "Last": "{:,.4f}",
-            "P/L": "{:+,.2f}",
-            "P/L %": "{:+.2f}%",
-        }),
+        df.style.format(fmt),
         use_container_width=True,
         hide_index=True,
     )
-    st.metric("Total unrealized P/L", f"{total_pnl:+,.2f}")
 
-    st.markdown("**Manage**")
-    target = st.selectbox(
-        "Pick a position",
-        options=[(p["id"], f"#{p['id']} {p['symbol']} {p['side']} qty={p['qty']}") for p in open_pos],
-        format_func=lambda x: x[1],
+    st.markdown(
+        "**How to read this table** — *Entry* uses the latest delayed quote. *Stop-Loss* "
+        "is `entry ∓ SL_mult × ATR(14)`. *TP1/TP2/TP3* are `1R / rrR / (rr+1)R` from entry. "
+        "Always sanity-check against support/resistance, news, and your own risk tolerance "
+        "before acting."
     )
-    pid = target[0]
-    pos = next(p for p in open_pos if p["id"] == pid)
-    ccy = currency_of(pos["symbol"])
-    exit_price = st.number_input(
-        f"Exit price ({ccy})",
-        min_value=0.0,
-        value=float(pos["entry"]),
-        step=0.01,
-        format="%.4f",
-    )
-    col_a, col_b = st.columns(2)
-    if col_a.button("Close position"):
-        close_position(pid, float(exit_price))
-        st.success(f"Position #{pid} closed at {exit_price}.")
-        st.rerun()
-    if col_b.button("Delete position", type="secondary"):
-        delete_position(pid)
-        st.warning(f"Position #{pid} deleted.")
-        st.rerun()
-
-# --- Closed positions --------------------------------------------------------------
-
-st.divider()
-st.subheader("Closed positions")
-
-closed_pos = list_positions(status="closed")
-if not closed_pos:
-    st.write("—")
-else:
-    rows = []
-    total = 0.0
-    for p in closed_pos:
-        if p["exit_price"] is None:
-            continue
-        if p["side"] == "long":
-            pnl = (p["exit_price"] - p["entry"]) * p["qty"]
-        else:
-            pnl = (p["entry"] - p["exit_price"]) * p["qty"]
-        total += pnl
-        cost = p["entry"] * p["qty"]
-        pct = pnl / cost * 100.0 if cost else 0.0
-        rows.append({
-            "ID": p["id"],
-            "Symbol": p["symbol"],
-            "Side": p["side"],
-            "Entry": p["entry"],
-            "Exit": p["exit_price"],
-            "Qty": p["qty"],
-            "P/L": pnl,
-            "P/L %": pct,
-            "Opened": p["opened_at"],
-            "Closed": p["closed_at"],
-        })
-    df = pd.DataFrame(rows)
-    st.dataframe(
-        df.style.format({
-            "Entry": "{:,.4f}",
-            "Exit": "{:,.4f}",
-            "Qty": "{:,.0f}",
-            "P/L": "{:+,.2f}",
-            "P/L %": "{:+.2f}%",
-        }),
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.metric("Total realized P/L", f"{total:+,.2f}")
+elif not generate:
+    st.info("No recommendations yet. Set your filters in the sidebar and click *Generate recommendations*.")
