@@ -31,10 +31,12 @@ from typing import Any
 # Symbol mapping
 # ---------------------------------------------------------------------------
 
-# Hand-maintained NASDAQ subset. Anything else inside the US universe defaults to
-# NYSE.  The list deliberately overlaps with ``core/universe.py``'s NASDAQ100 +
-# common high-volume tech names.
+# Hand-maintained NASDAQ-listed subset.  Members of the NASDAQ-100 *index* are
+# NOT all NASDAQ-listed (e.g., WMT, KHC, LIN, HON are NYSE-listed but still in
+# the index), so we must curate this manually rather than auto-deriving from
+# ``core/universe.NASDAQ100``.  Anything not found here defaults to NYSE.
 _NASDAQ_TICKERS: frozenset[str] = frozenset({
+    # Mega caps + popular tech
     "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA",
     "AVGO", "COST", "PEP", "ADBE", "NFLX", "AMD", "INTC", "CSCO", "QCOM",
     "TXN", "AMAT", "INTU", "AMGN", "ISRG", "BKNG", "VRTX", "REGN", "ADP",
@@ -45,6 +47,11 @@ _NASDAQ_TICKERS: frozenset[str] = frozenset({
     "BIIB", "WBD", "EBAY", "GEHC", "MCHP", "VRSK", "IDXX", "CPRT", "WBA",
     "PLTR", "COIN", "SNOW", "MARA", "NET", "ZS", "TMUS", "CMCSA", "ORCL",
     "SHOP", "MDB", "OKTA", "ROKU", "ZM", "DOCU", "SQ", "SOFI", "UBER",
+    # Additional NASDAQ-listed names from the expanded NASDAQ-100 universe
+    "ADSK", "ALNY", "APP", "ARM", "AXON", "CCEP", "CDW", "CEG", "CSGP",
+    "CTSH", "DASH", "DLTR", "EA", "FANG", "FER", "INSM", "MPWR", "MRNA",
+    "MSTR", "PDD", "PSKY", "SBAC", "SNDK", "STX", "TRI", "TTD", "TTWO",
+    "VRSN", "WDAY", "WDC", "XEL",
 })
 
 

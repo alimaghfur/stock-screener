@@ -6,7 +6,7 @@ A Streamlit app to screen Indonesian (IDX) and US stocks for **scalping** and **
 
 - **Screener** — scalping (intraday momentum) & swing (multi-day trend) filters with technical indicators (RSI, MACD, MA cross, ATR, VWAP, volume spike). IDX-only `BPJS` (Beli Pagi Jual Sore) and `BSJP` (Beli Sore Jual Pagi) pattern strategies.
 - **TP / SL Suggestion** — ATR-based stop-loss with configurable risk:reward (default 1:2). Provides entry, SL, and three TP targets.
-- **Top Movers** — top gainers and top losers per market (IDX LQ45 / IDX30, US S&P 500 subset / NASDAQ 100 subset).
+- **Top Movers** — top gainers and top losers per market (IDX: IDX30 / LQ45 / IDX80 / Kompas100; US: Dow 30 / Large Cap top ~100 / NASDAQ 100 / S&P 500).
 - **News** — Yahoo Finance per-ticker articles (delayed) with thumbnails, plus an embedded TradingView Top Stories widget as a second source.
 - **TradingView integration** — Advanced Chart and Technical Analysis gauge embedded in Screener drill-down for a "second opinion", plus a webhook receiver that captures TradingView alerts and surfaces them on the Alerts page.
 - **Position Tracking** — log open positions (entry, qty, TP, SL), monitor live P/L, mark closed.
@@ -27,10 +27,18 @@ Open `http://localhost:8501` in your browser.
 
 ## Markets & tickers
 
-- **IDX**: tickers use the `.JK` suffix (e.g. `BBCA.JK`). Built-in universes: LQ45, IDX30, IDX80.
-- **US**: standard tickers (e.g. `AAPL`). Built-in universes: S&P 500 top names, NASDAQ 100 top names.
+- **IDX**: tickers use the `.JK` suffix (e.g. `BBCA.JK`). Built-in universes:
+  - **IDX30** (30) — most liquid IDX blue chips, refreshed quarterly by BEI.
+  - **LQ45** (45) — top 45 most liquid + sizeable IDX names.
+  - **IDX80** (~90) — extended IDX80 set.
+  - **Kompas100** (~100) — broader 100-stock index, hand-curated snapshot from `id.wikipedia.org` plus the latest BEI Aug-Oct 2024 reshuffle. Refresh manually as compositions change.
+- **US**: standard tickers (e.g. `AAPL`, dual-class with Yahoo dash convention `BRK-B`). Built-in universes:
+  - **Dow 30** (30) — Dow Jones Industrial Average mega-caps.
+  - **Large Cap (top ~100)** (106) — quick-scan curated subset for fast scans.
+  - **NASDAQ 100** (101) — full NASDAQ-100 index (101 due to dual-class).
+  - **S&P 500** (503) — full S&P 500 index (503 due to dual-class). Heaviest scan, slowest run.
 
-Custom tickers can be entered directly in the Screener page.
+Custom tickers can be entered directly in the Screener and News pages. Universe lists are hand-maintained snapshots in `core/universe.py` — refresh periodically from the source-of-truth tables (see comment at top of that file).
 
 ## Project layout
 
