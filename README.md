@@ -6,7 +6,7 @@ A Streamlit app to screen Indonesian (IDX) and US stocks for **scalping** and **
 
 - **Screener** — scalping (intraday momentum) & swing (multi-day trend) filters with technical indicators (RSI, MACD, MA cross, ATR, VWAP, volume spike). IDX-only `BPJS` (Beli Pagi Jual Sore) and `BSJP` (Beli Sore Jual Pagi) pattern strategies.
 - **TP / SL Suggestion** — ATR-based stop-loss with configurable risk:reward (default 1:2). Provides entry, SL, and three TP targets.
-- **Top Movers** — top gainers and top losers per market (IDX: IDX30 / LQ45 / IDX80 / Kompas100; US: Dow 30 / Large Cap top ~100 / NASDAQ 100 / S&P 500).
+- **Top Movers** — top gainers and top losers per market (IDX: 17 universes including liquidity tiers, syariah, BUMN, dividend, sectoral, IHSG; US: Dow 30 / Large Cap top ~100 / NASDAQ 100 / S&P 500).
 - **News** — Yahoo Finance per-ticker articles (delayed) with thumbnails, plus an embedded TradingView Top Stories widget as a second source.
 - **TradingView integration** — Advanced Chart and Technical Analysis gauge embedded in Screener drill-down for a "second opinion", plus a webhook receiver that captures TradingView alerts and surfaces them on the Alerts page.
 - **Position Tracking** — log open positions (entry, qty, TP, SL), monitor live P/L, mark closed.
@@ -27,11 +27,21 @@ Open `http://localhost:8501` in your browser.
 
 ## Markets & tickers
 
-- **IDX**: tickers use the `.JK` suffix (e.g. `BBCA.JK`). Built-in universes:
-  - **IDX30** (30) — most liquid IDX blue chips, refreshed quarterly by BEI.
-  - **LQ45** (45) — top 45 most liquid + sizeable IDX names.
-  - **IDX80** (~90) — extended IDX80 set.
-  - **Kompas100** (~100) — broader 100-stock index, hand-curated snapshot from `id.wikipedia.org` plus the latest BEI Aug-Oct 2024 reshuffle. Refresh manually as compositions change.
+- **IDX**: tickers use the `.JK` suffix (e.g. `BBCA.JK`). Built-in universes (~942 unique tickers across 17 lists):
+  - **Core liquidity tiers**:
+    - **IDX30** (30) — most liquid IDX blue chips, refreshed quarterly by BEI.
+    - **LQ45** (45) — top 45 most liquid + sizeable IDX names.
+    - **IDX80** (~90) — extended IDX80 set.
+    - **Kompas100** (~100) — broader 100-stock index from `id.wikipedia.org` + BEI Aug-Oct 2024 reshuffle.
+  - **Themed indices**:
+    - **JII** (30) — Jakarta Islamic Index, syariah-compliant blue chips (excludes banks).
+    - **JII70** (70) — extended Jakarta Islamic Index 70.
+    - **IDXBUMN20** (20) — 20 BUMN (state-owned enterprise) stocks.
+    - **IDXHIDIV20** (20) — 20 high-dividend-yield stocks (Feb 2025 - Feb 2026 evaluation).
+  - **Sectoral** (IDX-IC classification, full sector membership; supersets the official BEI sectoral indices which apply additional free-float / liquidity filters):
+    - **Basic Materials** (110), **Consumer Cyclicals** (164), **Consumer Non-Cyclicals** (129), **Energy** (88), **Financials** (104), **Healthcare** (34), **Industrials** (67), **Infrastructure** (69), **Properties & Real Estate** (92), **Technology** (47), **Transportation & Logistics** (37).
+  - **Full coverage**:
+    - **IHSG (all listed, ~941)** — every BEI-listed ticker. Heavy scan (~10-15 minutes). Many low-liquidity names; not realistic for short-horizon scalping/swing.
 - **US**: standard tickers (e.g. `AAPL`, dual-class with Yahoo dash convention `BRK-B`). Built-in universes:
   - **Dow 30** (30) — Dow Jones Industrial Average mega-caps.
   - **Large Cap (top ~100)** (106) — quick-scan curated subset for fast scans.
